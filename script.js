@@ -180,6 +180,53 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (e) { console.error(e); return null; }
     };
 
+    // Upload multipart chunks concurrently, but keep a bounded number of requests active.
+    // R2 completion still requires every part in ascending part-number order.
+    const uploadMultipartParts = async ({ file, r2Key, uploadId, headers, concurrency = 4, onProgress }) => {
+        const CHUNK_SIZE = 10 * 1024 * 1024;
+        const totalParts = Math.max(1, Math.ceil(file.size / CHUNK_SIZE));
+        const uploadedParts = new Array(totalParts);
+        let nextPartIndex = 0;
+        let completedParts = 0;
+
+        const uploadNextPart = async () => {
+            while (true) {
+                const partIndex = nextPartIndex++;
+                if (partIndex >= totalParts) return;
+
+                const partNumber = partIndex + 1;
+                const chunk = file.slice(
+                    partIndex * CHUNK_SIZE,
+                    Math.min((partIndex + 1) * CHUNK_SIZE, file.size)
+                );
+                const partURL = `${MAIN_API_URL}/api/admin/upload-part?key=${encodeURIComponent(r2Key)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`;
+                const partResponse = await fetch(partURL, {
+                    method: 'PUT',
+                    body: chunk,
+                    headers
+                });
+                const partData = await partResponse.json();
+
+                if (!partResponse.ok || partData.error || !partData.etag) {
+                    throw new Error(partData.error || `Failed to upload part ${partNumber}`);
+                }
+
+                uploadedParts[partIndex] = {
+                    partNumber: partData.partNumber,
+                    etag: partData.etag
+                };
+                completedParts += 1;
+                if (onProgress) onProgress(completedParts, totalParts);
+            }
+        };
+
+        await Promise.all(
+            Array.from({ length: Math.min(concurrency, totalParts) }, uploadNextPart)
+        );
+
+        return uploadedParts;
+    };
+
     // --- Toast Helper ---
     const captureFirstFrame = (videoUrl) => new Promise((resolve, reject) => {
         const video = document.createElement('video');
@@ -428,7 +475,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             contentArea.innerHTML = `
         <section class="hero-card">
-            <h1>Torah Anytime, Anywhere.</h1>
+            <h1>Hasmo Beis, Anytime, Anywhere.</h1>
             <p style="max-width: 600px; font-size: 1.1rem; opacity: 0.8;">Explore a vast library of Shiurim from our esteemed Rabbis. Watch, listen, and grow.</p>
             <div class="hero-actions">
                 <button class="btn btn-primary" onclick="loadPage('all')">Browse Library</button>
@@ -1302,27 +1349,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const { r2Key, uploadId, thumbnailUrl } = await prep.json();
 
-                    // Step 2: Upload video in chunks (10MB each)
-                    const CHUNK_SIZE = 10 * 1024 * 1024; // 10MB per chunk
-                    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-                    const uploadedParts = [];
-
-                    for (let i = 0; i < totalParts; i++) {
-                        const start = i * CHUNK_SIZE;
-                        const end = Math.min(start + CHUNK_SIZE, file.size);
-                        const chunk = file.slice(start, end);
-                        const partNumber = i + 1;
-
-                        btn.textContent = `Uploading part ${partNumber}/${totalParts}...`;
-
-                        const partRes = await fetch(
-                            `${MAIN_API_URL}/api/admin/upload-part?key=${encodeURIComponent(r2Key)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`,
-                            { method: 'PUT', body: chunk, headers: authHeaders }
-                        );
-                        const partData = await partRes.json();
-                        if (partData.error) throw new Error(partData.error);
-                        uploadedParts.push({ partNumber: partData.partNumber, etag: partData.etag });
-                    }
+                    // Step 2: Upload video parts concurrently (10MB each, up to 4 at a time).
+                    const uploadedParts = await uploadMultipartParts({
+                        file,
+                        r2Key,
+                        uploadId,
+                        headers: authHeaders,
+                        onProgress: (completed, total) => {
+                            btn.textContent = `Uploaded ${completed}/${total} parts...`;
+                        }
+                    });
 
                     // Step 3: Complete the multipart upload
                     btn.textContent = 'Finalizing...';
@@ -1410,26 +1446,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     }
                     const { r2Key, uploadId } = await prep.json();
 
-                    // Upload audio in chunks
-                    const CHUNK_SIZE = 10 * 1024 * 1024;
-                    const totalParts = Math.ceil(file.size / CHUNK_SIZE);
-                    const uploadedParts = [];
-
-                    for (let i = 0; i < totalParts; i++) {
-                        const start = i * CHUNK_SIZE;
-                        const end = Math.min(start + CHUNK_SIZE, file.size);
-                        const chunk = file.slice(start, end);
-                        const partNumber = i + 1;
-                        btn.textContent = `Uploading part ${partNumber}/${totalParts}...`;
-
-                        const partRes = await fetch(
-                            `${MAIN_API_URL}/api/admin/upload-part?key=${encodeURIComponent(r2Key)}&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`,
-                            { method: 'PUT', body: chunk, headers: authHeaders }
-                        );
-                        const partData = await partRes.json();
-                        if (partData.error) throw new Error(partData.error);
-                        uploadedParts.push({ partNumber: partData.partNumber, etag: partData.etag });
-                    }
+                    // Upload audio parts concurrently (10MB each, up to 4 at a time).
+                    const uploadedParts = await uploadMultipartParts({
+                        file,
+                        r2Key,
+                        uploadId,
+                        headers: authHeaders,
+                        onProgress: (completed, total) => {
+                            btn.textContent = `Uploaded ${completed}/${total} parts...`;
+                        }
+                    });
 
                     btn.textContent = 'Finalizing...';
                     const completeRes = await fetch(`${MAIN_API_URL}/api/admin/complete-upload`, {

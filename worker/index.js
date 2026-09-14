@@ -373,7 +373,9 @@ export default {
         const thumbKey = `thumbnails/${date}-${cleanRabbi}-${cleanTitle}.jpg`;
 
         // Set content type based on extension
-        const contentType = extension.toLowerCase() === 'mov' ? 'video/quicktime' : 'video/mp4';
+        const contentType = extension.toLowerCase() === 'mov' ? 'video/quicktime' :
+          ['m4a', 'mp3'].includes(extension.toLowerCase()) ? 'audio/mpeg' :
+          'video/mp4';
 
         // Start multipart upload for the video
         const multipartUpload = await env.NEW_VIDEO_BUCKET.createMultipartUpload(r2Key, {
@@ -409,10 +411,10 @@ export default {
       try {
         const r2Key = url.searchParams.get("key");
         const uploadId = url.searchParams.get("uploadId");
-        const partNumber = parseInt(url.searchParams.get("partNumber"));
+        const partNumber = Number.parseInt(url.searchParams.get("partNumber"), 10);
 
-        if (!r2Key || !uploadId || isNaN(partNumber)) {
-          return new Response("Missing key, uploadId, or partNumber", { status: 400, headers: corsHeaders });
+        if (!r2Key || !uploadId || !Number.isInteger(partNumber) || partNumber < 1) {
+          return new Response("Missing or invalid key, uploadId, or partNumber", { status: 400, headers: corsHeaders });
         }
 
         const multipartUpload = env.NEW_VIDEO_BUCKET.resumeMultipartUpload(r2Key, uploadId);
@@ -439,12 +441,24 @@ export default {
       try {
         const { r2Key, uploadId, parts } = await request.json();
 
-        if (!r2Key || !uploadId || !parts) {
+        if (!r2Key || !uploadId || !Array.isArray(parts) || parts.length === 0) {
           return new Response("Missing r2Key, uploadId, or parts", { status: 400, headers: corsHeaders });
         }
 
+        const normalizedParts = parts
+          .map(part => ({
+            partNumber: Number(part.partNumber),
+            etag: part.etag
+          }))
+          .filter(part => Number.isInteger(part.partNumber) && part.partNumber > 0 && typeof part.etag === 'string' && part.etag.length > 0)
+          .sort((a, b) => a.partNumber - b.partNumber);
+
+        if (normalizedParts.length !== parts.length || normalizedParts.some((part, index) => index > 0 && part.partNumber === normalizedParts[index - 1].partNumber)) {
+          return new Response("Invalid or duplicate multipart parts", { status: 400, headers: corsHeaders });
+        }
+
         const multipartUpload = env.NEW_VIDEO_BUCKET.resumeMultipartUpload(r2Key, uploadId);
-        await multipartUpload.complete(parts);
+        await multipartUpload.complete(normalizedParts);
 
         return new Response(JSON.stringify({ success: true, r2Key: r2Key }), {
           headers: { ...corsHeaders, "Content-Type": "application/json" }
