@@ -1,0 +1,8 @@
+# Flutter build/cache files
+/flutter/build/
+.dart_tool/
+.packages
+flutter/.pub/
+flutter/build/
+flutter/.dart_tool/
+flutter/.packages

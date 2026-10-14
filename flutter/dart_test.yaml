@@ -1,0 +1,7 @@
+# The `live` tag marks tests that reach the real API and so depend on the
+# network and on production data. They are skipped by default and run with:
+#
+#   flutter test --tags live --run-skipped
+tags:
+  live:
+    skip: "opt-in network test: flutter test --tags live --run-skipped"

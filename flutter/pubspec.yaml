@@ -1,0 +1,54 @@
+name: beisanytime
+description: "Beis Anytime — a Flutter port of the iOS shiur library app."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+
+  # Networking — mirrors APIClient.swift (worker JSON APIs + chunked R2 upload).
+  http: ^1.6.0
+
+  # Dates in the same medium style as DateFormatter(.medium).
+  intl: ^0.20.3
+
+  # Theme, bookmarks and playback position (UserDefaults equivalents).
+  shared_preferences: ^2.5.3
+
+  # Google session and upload password — the KeychainStore equivalent.
+  flutter_secure_storage: ^11.2.0
+
+  # Native Google Sign-In, the same iOS OAuth client the Swift app uses.
+  google_sign_in: ^7.2.0
+
+  # AVPlayer's counterpart: system controls, fullscreen, PiP on iOS.
+  video_player: ^2.14.1
+
+  # Thumbnail/capture picking from the photo library (PhotosUI equivalent).
+  image_picker: ^1.2.4
+
+  # Files-app import for arbitrary video/audio (fileImporter equivalent).
+  file_picker: ^12.2.0
+
+  # Writable temp directory for the file being uploaded.
+  path_provider: ^2.1.6
+
+  # Share sheet, replacing UIActivityViewController.
+  share_plus: ^13.3.1
+  forui: ^0.27.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

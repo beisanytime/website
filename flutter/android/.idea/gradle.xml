@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="GradleSettings">
+    <option name="linkedExternalProjectsSettings">
+      <GradleProjectSettings>
+        <compositeConfiguration>
+          <compositeBuild compositeDefinitionSource="SCRIPT">
+            <builds>
+              <build path="$USER_HOME$/flutter/packages/flutter_tools/gradle" name="gradle">
+                <projects>
+                  <project path="$USER_HOME$/flutter/packages/flutter_tools/gradle" />
+                </projects>
+              </build>
+            </builds>
+          </compositeBuild>
+        </compositeConfiguration>
+        <option name="testRunner" value="CHOOSE_PER_TEST" />
+        <option name="externalProjectPath" value="$PROJECT_DIR$" />
+        <option name="modules">
+          <set>
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/android_file_picker-1.1.1/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_plugin_android_lifecycle-2.0.35/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/flutter_secure_storage-11.2.0/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/google_sign_in_android-7.2.18/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/image_picker_android-0.8.13+25/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/jni-1.1.0/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/jni_flutter-1.0.4+1/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/share_plus-13.3.1/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/shared_preferences_android-2.4.28/android" />
+            <option value="$USER_HOME$/.pub-cache/hosted/pub.dev/video_player_android-2.12.2/android" />
+            <option value="$USER_HOME$/flutter/packages/flutter_tools/gradle" />
+            <option value="$PROJECT_DIR$" />
+            <option value="$PROJECT_DIR$/app" />
+          </set>
+        </option>
+      </GradleProjectSettings>
+    </option>
+  </component>
+</project>

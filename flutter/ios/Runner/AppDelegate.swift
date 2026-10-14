@@ -1,0 +1,18 @@
+import Flutter
+import UIKit
+
+@main
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  override func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    // A plain channel rather than a plugin, so it needs registering by hand.
+    VideoThumbnailChannel.register(with: engineBridge.applicationRegistrar.messenger())
+  }
+}
