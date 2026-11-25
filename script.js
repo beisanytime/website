@@ -53,7 +53,7 @@ const initializeGoogleSignIn = () => {
         callback: window.handleCredentialResponse,
         auto_select: false,
         cancel_on_tap_outside: true,
-        use_fedcm_for_prompt: true
+        itp_support: true
     });
 
     const button = document.getElementById('google-signin-button');
@@ -68,16 +68,79 @@ const initializeGoogleSignIn = () => {
     return true;
 };
 
+const closeSignInModal = () => {
+    const overlay = document.getElementById('signinModalOverlay');
+    if (overlay) overlay.remove();
+};
+
+const buildSignInOverlay = (innerHTML) => {
+    closeSignInModal();
+    const overlay = document.createElement('div');
+    overlay.id = 'signinModalOverlay';
+    overlay.className = 'share-modal-overlay';
+    overlay.innerHTML = `<div class="share-modal signin-modal" role="dialog" aria-modal="true" aria-labelledby="signinModalTitle">${innerHTML}</div>`;
+    document.body.appendChild(overlay);
+
+    const close = () => {
+        closeSignInModal();
+        document.removeEventListener('keydown', onKey);
+    };
+    const onKey = (event) => { if (event.key === 'Escape') close(); };
+    overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+    const cancel = overlay.querySelector('.signin-modal-cancel');
+    if (cancel) cancel.addEventListener('click', close);
+    document.addEventListener('keydown', onKey);
+    return overlay;
+};
+
+const showSignInUnavailable = () => {
+    buildSignInOverlay(`
+        <h3 id="signinModalTitle">Sign in</h3>
+        <p>Google Sign-In could not be loaded. Check your connection and reload the page.</p>
+        <button type="button" class="btn btn-secondary signin-modal-cancel">Close</button>`);
+};
+
+// One Tap (google.accounts.id.prompt) is suppressed on iOS Safari and Chrome on iOS,
+// and can be rate-limited or disabled per browser. Showing Google's rendered button
+// in a dialog is the flow that works everywhere, including mobile.
+const showSignInModal = () => {
+    if (!window.google || !window.google.accounts || !window.google.accounts.id) return false;
+
+    const overlay = buildSignInOverlay(`
+        <h3 id="signinModalTitle">Sign in</h3>
+        <p>Use your Google account to post, comment and save shiurim.</p>
+        <div id="signinModalButton" class="signin-modal-button"></div>
+        <button type="button" class="btn btn-secondary signin-modal-cancel">Cancel</button>`);
+
+    window.google.accounts.id.renderButton(overlay.querySelector('#signinModalButton'), {
+        type: 'standard',
+        shape: 'rectangular',
+        theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'filled_black' : 'outline',
+        size: 'large',
+        text: 'signin_with',
+        logo_alignment: 'left',
+        width: 280
+    });
+    return true;
+};
+
+window.addEventListener('google-signin-success', closeSignInModal);
+
 const startGoogleSignIn = () => {
-    if (initializeGoogleSignIn()) {
-        window.google.accounts.id.prompt();
-        return;
-    }
-    showToast('Google Sign-In is still loading. Please try again.', 'error');
+    const globalMenu = document.getElementById('globalMenu');
+    if (globalMenu) globalMenu.classList.remove('active');
+
+    if (showSignInModal()) return;
+
+    // The GIS script loads asynchronously; wait for it instead of failing silently.
     let attempts = 0;
     const retry = setInterval(() => {
         attempts += 1;
-        if (initializeGoogleSignIn() || attempts >= 20) clearInterval(retry);
+        if (showSignInModal()) return clearInterval(retry);
+        if (attempts >= 24) {
+            clearInterval(retry);
+            showSignInUnavailable();
+        }
     }, 250);
 };
 
