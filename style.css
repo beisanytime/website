@@ -186,6 +186,7 @@ p { color: inherit; }
 .btn-primary { color: #fff; background: var(--color-accent); border-color: var(--color-accent); box-shadow: 0 1px 2px hsla(214, 78%, 30%, .28); }
 .btn-primary:hover { color: #fff; background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
 .btn-secondary { color: var(--text-main); background: var(--bg-surface); }
+.btn-sm { min-height: 32px; padding: 0 12px; font-size: .8125rem; }
 .btn-icon i { color: var(--text-muted); transition: color .15s ease; }
 .btn-icon:hover i { color: var(--text-main); }
 #theme-toggle i, #mobile-theme-toggle i { color: var(--text-muted); transition: color .15s ease; }

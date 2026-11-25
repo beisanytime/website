@@ -46,24 +46,18 @@ window.handleCredentialResponse = (response) => {
     }
 };
 
+let googleInitialized = false;
 const initializeGoogleSignIn = () => {
     if (!window.google || !window.google.accounts || !window.google.accounts.id) return false;
-    window.google.accounts.id.initialize({
-        client_id: GOOGLE_CLIENT_ID,
-        callback: window.handleCredentialResponse,
-        auto_select: false,
-        cancel_on_tap_outside: true,
-        itp_support: true
-    });
-
-    const button = document.getElementById('google-signin-button');
-    if (button) {
-        window.google.accounts.id.renderButton(button, {
-            type: 'icon',
-            shape: 'circle',
-            theme: 'outline',
-            size: 'large'
+    if (!googleInitialized) {
+        window.google.accounts.id.initialize({
+            client_id: GOOGLE_CLIENT_ID,
+            callback: window.handleCredentialResponse,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+            itp_support: true
         });
+        googleInitialized = true;
     }
     return true;
 };
@@ -104,7 +98,7 @@ const showSignInUnavailable = () => {
 // and can be rate-limited or disabled per browser. Showing Google's rendered button
 // in a dialog is the flow that works everywhere, including mobile.
 const showSignInModal = () => {
-    if (!window.google || !window.google.accounts || !window.google.accounts.id) return false;
+    if (!initializeGoogleSignIn()) return false;
 
     const overlay = buildSignInOverlay(`
         <h3 id="signinModalTitle">Sign in</h3>
