@@ -1599,6 +1599,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Routing & Transitions ---
     window.loadPage = (p, params, skipHistory = false) => {
         document.body.classList.remove('cinema-mode');
+        document.getElementById('globalMenu')?.classList.remove('active');
         navItems.forEach(n => {
             n.classList.remove('active');
             if (n.dataset.page === p) n.classList.add('active');
@@ -1677,21 +1678,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const pToggle = document.getElementById('profileToggle'); // Desktop
     const mProfile = document.getElementById('mobileProfileToggle'); // Mobile Header
     const globalMenu = document.getElementById('globalMenu');
+    const profileTriggers = [pToggle, mProfile].filter(Boolean);
+
+    let menuOpenedAt = 0;
+
+    const closeMenu = () => {
+        if (!globalMenu.classList.contains('active')) return;
+        globalMenu.classList.remove('active');
+        profileTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', 'false'));
+    };
 
     const toggleMenu = (e) => {
         e.stopPropagation();
         e.preventDefault();
-        globalMenu.classList.toggle('active');
+        const opening = !globalMenu.classList.contains('active');
+        globalMenu.classList.toggle('active', opening);
+        if (opening) menuOpenedAt = performance.now();
+        profileTriggers.forEach(trigger => trigger.setAttribute('aria-expanded', String(opening)));
     };
 
-    if (pToggle) pToggle.onclick = toggleMenu;
-    if (mProfile) mProfile.onclick = toggleMenu;
-
-    document.addEventListener('click', (e) => {
-        if (!globalMenu.contains(e.target) && (!mProfile || !mProfile.contains(e.target)) && (!pToggle || !pToggle.contains(e.target))) {
-            globalMenu.classList.remove('active');
-        }
+    profileTriggers.forEach(trigger => {
+        trigger.setAttribute('aria-haspopup', 'true');
+        trigger.setAttribute('aria-expanded', 'false');
+        trigger.onclick = toggleMenu;
     });
+
+    // Close on the next interaction outside the menu. Listening for pointerdown in the
+    // capture phase, and ignoring the gesture that just opened it, prevents the menu from
+    // closing itself when a click and its synthesized mouse/touch events both fire.
+    document.addEventListener('pointerdown', (e) => {
+        if (!globalMenu.classList.contains('active')) return;
+        if (performance.now() - menuOpenedAt < 350) return;
+        if (globalMenu.contains(e.target)) return;
+        if (profileTriggers.some(trigger => trigger.contains(e.target))) return;
+        closeMenu();
+    }, true);
+
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
 
     document.getElementById('signOutBtn').onclick = () => {
         localStorage.removeItem('googleUser');
