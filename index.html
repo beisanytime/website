@@ -4,9 +4,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Beis Anytime</title>
+    <title>Hasmo Beis</title>
     <meta name="description"
-        content="Watch shiurim from Rabbi Hartman, Rabbi Rosenfeld, and Rabbi Golker anytime. A premium Torah streaming platform.">
+        content="Watch shiurim from Rabbi Hartman, Rabbi Rosenfeld, and Rabbi Golker anytime. Hasmo Beis — a premium Torah streaming platform.">
 
     <!-- Preconnect & DNS-Prefetch for Performance -->
     <link rel="preconnect" href="https://pub-7e0e719e722744199ebdc5c17d7b08d4.r2.dev">
@@ -31,91 +31,63 @@
 <body>
 
     <div class="app-shell">
-        
-        <!-- Mobile Top Header (Visible only on mobile) -->
-        <header class="mobile-header">
-            <a href="#" class="logo nav-link" onclick="loadPage('home'); return false;">
-                <img src="logo.png" alt="Beis Anytime" style="height: 24px; width: auto;">
-                <span>BEIS ANYTIME</span>
-            </a>
-            <div class="mobile-header-actions">
-                <button class="btn btn-secondary btn-icon" style="padding: 6px; border-radius:50%; width:32px; height:32px; display:flex; align-items:center; justify-content:center;" id="mobile-theme-toggle">
-                    <i class="fas fa-moon"></i>
-                </button>
-                <div id="mobile-auth-container">
-                    <button class="btn btn-primary btn-sm js-google-sign-in">Sign In</button>
-                </div>
-                <div class="profile-wrapper" id="mobileProfileDropdown" style="display: none;">
-                    <button class="profile-trigger" id="mobileProfileToggle" style="padding:0;">
-                        <img id="mobileUserAvatar" src="" class="avatar" alt="User" style="width:32px;height:32px;">
-                    </button>
-                </div>
-            </div>
-        </header>
 
-        <!-- Sidebar (Desktop) -->
-        <aside class="sidebar">
-            <div class="sidebar-header">
+        <!-- Top Header Bar -->
+        <header class="site-header">
+            <div class="header-inner">
                 <a href="#" class="logo nav-link" onclick="loadPage('home'); return false;">
-                    <img src="logo.png" alt="Beis Anytime" style="height: 28px; width: auto;">
-                    <span>BEIS ANYTIME</span>
+                    <img src="logo.png" alt="Hasmo Beis" style="height: 30px; width: auto;">
+                    <span>HASMO BEIS</span>
                 </a>
-            </div>
 
-            <!-- Search Bar -->
-            <div class="sidebar-search">
-                <div class="search-wrapper">
-                    <i class="fas fa-search"></i>
-                    <input type="text" id="globalSearch" class="search-input" placeholder="Search shiurim...">
+                <nav class="header-nav header-nav-primary" aria-label="Library">
+                    <a href="#" class="nav-item active" data-page="home">
+                        <i class="fas fa-home"></i> Home
+                    </a>
+                    <a href="#" class="nav-item" data-page="all">
+                        <i class="fas fa-compass"></i> Browse
+                    </a>
+                    <a href="#" class="nav-item" data-page="speakers">
+                        <i class="fas fa-microphone-lines"></i> Speakers
+                    </a>
+                    <a href="#" class="nav-item" data-page="time4mishna">
+                        <i class="fas fa-clock"></i> Time4Mishna
+                    </a>
+                </nav>
+
+                <div class="header-search">
+                    <div class="search-wrapper">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="globalSearch" class="search-input" placeholder="Search shiurim...">
+                    </div>
                 </div>
-            </div>
 
-            <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-page="home">
-                    <i class="fas fa-home"></i> Home
-                </a>
-                <a href="#" class="nav-item" data-page="all">
-                    <i class="fas fa-compass"></i> Browse
-                </a>
-                <a href="#" class="nav-item" data-page="community">
-                    <i class="fas fa-users"></i> Community
-                    <span class="nav-badge" id="community-badge" style="display:none;"></span>
-                </a>
-                <a href="#" class="nav-item" data-page="speakers">
-                    <i class="fas fa-microphone-lines"></i> Speakers
-                </a>
-                <a href="#" class="nav-item" data-page="bookmarks">
-                    <i class="fas fa-bookmark"></i> Watch Later
-                </a>
-                <a href="#" class="nav-item" data-page="time4mishna">
-                    <i class="fas fa-clock"></i> Time4Mishnah
-                </a>
-            </nav>
+                <div class="header-actions">
+                    <a href="#" class="nav-item" data-page="community">
+                        <i class="fas fa-users"></i> Community
+                        <span class="nav-badge" id="community-badge" style="display:none;"></span>
+                    </a>
+                    <a href="#" class="nav-item" data-page="bookmarks">
+                        <i class="fas fa-bookmark"></i> Watch Later
+                    </a>
 
-            <div style="flex:1;"></div>
-
-            <div class="sidebar-footer">
-                <div class="flex-between">
-                    <button class="btn btn-secondary" style="padding: 8px; border-radius:50%; width:36px; height:36px;"
-                        id="theme-toggle">
+                    <button class="btn btn-secondary btn-icon header-icon-btn" id="theme-toggle"
+                        aria-label="Toggle dark mode">
                         <i class="fas fa-moon"></i>
                     </button>
 
-                    <!-- Auth: Desktop Sidebar -->
                     <div id="desktop-auth-container">
                         <button class="btn btn-primary btn-sm js-google-sign-in">Sign In</button>
                     </div>
 
-                    <!-- Profile Trigger (Desktop) -->
                     <div class="profile-wrapper" id="profileDropdown" style="display: none;">
-                        <button class="profile-trigger" id="profileToggle">
+                        <button class="profile-trigger" id="profileToggle" aria-label="Account menu">
                             <img id="userAvatar" src="" class="avatar" alt="User">
-                            <i class="fas fa-chevron-up" style="font-size: 0.8rem; color: var(--text-muted)"></i>
                         </button>
                     </div>
                 </div>
             </div>
-        </aside>
+        </header>
 
         <!-- Main Content -->
         <main class="main-viewport">

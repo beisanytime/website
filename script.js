@@ -1,5 +1,5 @@
 // =================================================================================
-// Beis Anytime - Application Logic
+// Hasmo Beis - Application Logic
 // =================================================================================
 
 // --- Escaping helpers ---
@@ -637,7 +637,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div class="feed-header">
                 <div>
                     <h1>Community Feed</h1>
-                    <p class="feed-subtitle">Official announcements and updates from the Beis Anytime team</p>
+                    <p class="feed-subtitle">Official announcements and updates from the Hasmo Beis team</p>
                 </div>
                 <button class="btn btn-secondary feed-refresh-btn" onclick="loadPage('community')"><i class="fas fa-sync"></i> Refresh</button>
             </div>
@@ -659,7 +659,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="feed-notice-icon"><i class="fas fa-bullhorn"></i></div>
                 <div>
                     <strong>Official Announcements</strong>
-                    <span>Updates and news from the Beis Anytime team</span>
+                    <span>Updates and news from the Hasmo Beis team</span>
                 </div>
             </div>
             `}
