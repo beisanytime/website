@@ -1,15 +1,14 @@
 /// Endpoints and constants shared by the whole app.
 ///
-/// Mirrors `APIConfig` in `APIClient.swift`: the same three workers back the
-/// library, the community feed and the per-shiur social data.
+/// One API worker (deployed as `beis-api`) backs the library, admin uploads, the
+/// community feed and the per-shiur social data, served at `api.beisanytime.com`.
 class ApiConfig {
   const ApiConfig._();
 
-  static const String mainApi = 'https://beis-api.beisanytime.workers.dev';
-  static const String communityApi =
-      'https://beis-social-worker.beisanytime.workers.dev';
-  static const String videoApi =
-      'https://beis-anytime-viewsapi.beisanytime.workers.dev';
+  static const String apiBase = 'https://api.beisanytime.com';
+  static const String mainApi = apiBase;
+  static const String communityApi = apiBase;
+  static const String videoApi = apiBase;
 
   /// Public site, used for share links.
   static const String siteUrl = 'https://beisanytime.com';

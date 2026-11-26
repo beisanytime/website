@@ -155,18 +155,16 @@ const startGoogleSignIn = () => {
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Configuration ---
-    // 0. API for Video Metadata & Uploads (New R2-based worker)
-
-    // 1. API for Community Feed (The new D1 Worker)
-    const COMMUNITY_API_URL = 'https://beis-social-worker.beisanytime.workers.dev'; // UPDATE THIS!
-
-    // 2. API for Video Likes/Comments (The original KV Worker)
-    const VIDEO_API_URL = 'https://beis-anytime-viewsapi.beisanytime.workers.dev';
+    // One API worker (deployed as beis-api) serves the library, the uploads, the
+    // community feed and the per-shiur social data.
+    const API_URL = 'https://api.beisanytime.com';
+    const MAIN_API_URL = API_URL;      // library, media proxy, admin uploads
+    const COMMUNITY_API_URL = API_URL; // community feed (D1)
+    const VIDEO_API_URL = API_URL;     // views / likes / comments
 
     // Display-only allow-list. Authorization is enforced by the workers from a verified
     // Google ID token (env.ADMIN_EMAILS); this only decides which UI to show.
     const ADMIN_EMAILS = ['joshuacalvert1@gmail.com'];
-    const MAIN_API_URL = 'https://beis-api.beisanytime.workers.dev';
 
     // --- State ---
     let allShiurimCache = [];
@@ -245,10 +243,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return null;
         }
         const headers = { ...options.headers, ...getAuthHeaders(), 'X-Upload-Password': password };
-        if (currentUser) {
-            headers['X-User-Email'] = currentUser.email;
-            headers['X-User-Name'] = currentUser.name;
-        }
+        if (currentUser) headers['X-User-Name'] = currentUser.name;
         try {
             const res = await fetch(`${MAIN_API_URL}${endpoint}`, { ...options, headers });
             if (res.status === 401) {
@@ -1171,7 +1166,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!currentUser) return showToast('Please sign in', 'error');
                     await workerFetch(VIDEO_API_URL, `/api/likes/${encodeURIComponent(params.id)}`, {
                         method: 'POST',
-                        headers: { 'X-User-Email': currentUser.email, ...getAuthHeaders() }
+                                                    headers: getAuthHeaders()
                     });
                 };
 
@@ -1247,7 +1242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             await workerFetch(VIDEO_API_URL, `/api/comments/${encodeURIComponent(params.id)}`, {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'X-User-Email': currentUser.email, ...getAuthHeaders() },
+                                headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
                                 body: JSON.stringify({ text: txt })
                             });
 
@@ -1261,7 +1256,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (confirm('Delete comment?')) {
                         await workerFetch(VIDEO_API_URL, `/api/comments/${encodeURIComponent(params.id)}/${cid}`, {
                             method: 'DELETE',
-                            headers: { 'X-User-Email': currentUser.email, ...getAuthHeaders() }
+                            headers: getAuthHeaders()
                         });
                         refreshComments();
                     }

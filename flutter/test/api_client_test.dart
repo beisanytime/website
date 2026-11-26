@@ -165,7 +165,7 @@ void main() {
 
     for (final request in seen) {
       expect(request.headers['X-Upload-Password'], 'secret');
-      expect(request.headers['X-User-Email'], 'admin@example.com');
+      expect(request.headers['X-User-Name'], 'Admin');
     }
   });
 

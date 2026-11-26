@@ -264,14 +264,14 @@ class _ShiurPlayerScreenState extends State<ShiurPlayerScreen> {
 
   Future<void> _toggleLike() async {
     final state = AppScope.of(context);
-    final email = state.user?.email;
-    if (email == null) {
+    final user = state.user;
+    if (user == null) {
       _showToast('Please sign in', kind: ToastKind.error);
       return;
     }
     try {
-      await state.api.toggleLike(shiurId: widget.shiurId, email: email);
-      final likes = await state.api.getLikes(widget.shiurId);
+      await state.api.toggleLike(shiurId: widget.shiurId, user: user);
+      final likes = await state.api.getLikes(widget.shiurId, user: user);
       if (mounted) {
         setState(() {
           _likeCount = likes.count;
@@ -285,9 +285,9 @@ class _ShiurPlayerScreenState extends State<ShiurPlayerScreen> {
 
   Future<void> _postComment() async {
     final state = AppScope.of(context);
-    final email = state.user?.email;
+    final user = state.user;
     final text = _commentText.text.trim();
-    if (email == null || text.isEmpty) {
+    if (user == null || text.isEmpty) {
       return;
     }
     setState(() => _isPostingComment = true);
@@ -295,7 +295,7 @@ class _ShiurPlayerScreenState extends State<ShiurPlayerScreen> {
       await state.api.postComment(
         shiurId: widget.shiurId,
         text: text,
-        email: email,
+        user: user,
       );
       _commentText.clear();
       await _loadComments();
@@ -310,15 +310,15 @@ class _ShiurPlayerScreenState extends State<ShiurPlayerScreen> {
 
   Future<void> _deleteComment(Comment comment) async {
     final state = AppScope.of(context);
-    final email = state.user?.email;
-    if (email == null) {
+    final user = state.user;
+    if (user == null) {
       return;
     }
     try {
       await state.api.deleteComment(
         shiurId: widget.shiurId,
         commentId: comment.id,
-        email: email,
+        user: user,
       );
       await _loadComments();
     } on ApiException {

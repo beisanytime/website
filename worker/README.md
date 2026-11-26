@@ -1,140 +1,129 @@
-Cloudflare Worker for Beis Anytime — Views / Likes / Comments / Display names / Banning
+# Beis Anytime API worker
 
-What this worker provides
-- View counter per shiur (increment and read)
-- Likes per shiur (per-user toggle by email)
-- Comments per shiur (any signed-in user can post), store per-shiur comment list
-- Display name storage per user
-- Ban endpoint to stop specific emails from commenting
-- Admin-only actions: delete comments, ban users
+One Cloudflare Worker now backs the whole product. It is deployed as `beis-api`
+(`https://beis-api.beisanytime.workers.dev`) and the site and apps call it at
+**`https://api.beisanytime.com`**.
 
-KV Namespaces to create and bind
-- VIEWS_KV
-- LIKES_KV
-- COMMENTS_KV
-- USERS_KV
-- BANS_KV
+`worker/index.js` is self-contained — the Google ID-token verifier lives in the same
+file — so it can be deployed with `wrangler` or pasted into the dashboard.
 
-Worker file
-- worker/index.js
+## Routes
 
-Environment variables
-- ADMIN_EMAIL (e.g. beisanytime@gmail.com) — used for admin checks
-- ADMIN_API_KEY (optional) — optional secret you can use instead of or in addition to ADMIN_EMAIL
+Library and media
+- `GET /api/all-shiurim` — R2 library merged with the legacy KV library
+- `GET /api/shiurim/id/:id` — one shiur
+- `GET|HEAD /api/video-proxy?key=…` — serves videos/thumbnails from R2 (Range aware)
 
-R2 Metadata Worker (worker/index.js) — Admin Auth & Upload Logging
-===================================================================
+Admin (require `X-Upload-Password` **and** a verified admin Google ID token)
+- `POST /api/admin/prepare-upload`, `PUT /api/admin/upload-part`, `POST /api/admin/complete-upload`, `POST /api/admin/abort-upload`
+- `PUT /api/upload-proxy` (thumbnail)
+- `GET /api/admin/shiurim`, `DELETE /api/admin/shiurim/:id`
+- `POST /api/admin/refresh-thumbnails`, `POST /api/admin/cleanup-malformed-thumbnails`
+- `GET /api/admin/upload-logs`
+- `GET /api/debug-r2`
 
-The main API worker now requires server-side password validation and Google Sign-In for all admin operations.
+Social
+- `GET /api/views/:id`, `POST /api/views/increment` `{ id }`
+- `GET /api/likes/:id`, `POST /api/likes/:id` (toggle; signed in)
+- `GET /api/comments/:id`, `POST /api/comments/:id` `{ text }` (signed in)
+- `DELETE /api/comments/:id/:commentId` (admin)
+- `GET /api/users/:email`, `PUT /api/users/:email` `{ displayName }` (self or admin)
+- `POST /api/ban` `{ email }` (admin)
 
-Environment variables (set via Cloudflare dashboard or `wrangler secret put`):
-- UPLOAD_PASSWORD — The admin password (secret, not in client code)
-- R2_PUBLIC_URL — Public R2 domain (optional, defaults to https://r2.beisanytime.com)
-- ADMIN_EMAILS — Comma-separated admin Google addresses (optional; defaults to joshuacalvert1@gmail.com)
-- GOOGLE_CLIENT_ID — OAuth web client id used as the ID-token audience (optional; defaults to the value in google-auth.js)
-- ALLOWED_ORIGINS — Comma-separated origins allowed to call the worker (optional; unset keeps `*`)
+Community feed (D1)
+- `GET /api/posts`, `POST /api/posts` `{ content }` (admin), `DELETE /api/posts/:id` (admin)
 
-KV Namespace to create and bind:
-- UPLOAD_LOGS_KV — Stores upload logs (who uploaded what, when)
+Everything else is proxied to the legacy worker at `beis-anytime-api` (with credentials
+and identity headers stripped).
 
-Admin routes (all require X-Upload-Password *and* a verified Google ID token in
-`Authorization: Bearer <id_token>`):
-- POST /api/admin/prepare-upload — Start multipart upload (also requires X-User-Email)
-- PUT /api/admin/upload-part — Upload chunk
-- POST /api/admin/complete-upload — Finalize upload
-- PUT /api/upload-proxy — Upload thumbnail
-- GET /api/admin/shiurim — List all shiurim
-- DELETE /api/admin/shiurim/:id — Delete shiur
-- POST /api/admin/refresh-thumbnails — Regenerate thumbnails
-- POST /api/admin/cleanup-malformed-thumbnails — Fix bad thumbnails
-- GET /api/admin/upload-logs — View upload history
+## Identity
 
-The ID token is verified in `worker/google-auth.js` (signature via Google's JWKS, plus
-issuer, audience, expiry and verified-email checks). Both workers import that file, so
-deploy with `wrangler deploy` (or `wrangler dev`) from a directory that contains it — a
-single-file copy pasted into the dashboard will not resolve the import.
+Callers send their Google ID token as `Authorization: Bearer <id_token>`. The worker
+verifies the RS256 signature against Google's JWKS and checks issuer, audience,
+expiry and the verified-email claim before trusting the email. `X-User-Email` is
+ignored everywhere — it used to be spoofable.
 
-Setup:
-1. Set the upload password: wrangler secret put UPLOAD_PASSWORD
-2. Create UPLOAD_LOGS_KV namespace: wrangler kv:namespace create UPLOAD_LOGS_KV
-3. Add to wrangler.toml:
-   [[kv_namespaces]]
-   binding = "UPLOAD_LOGS_KV"
-   id = "YOUR_KV_ID_HERE"
+Admin access on the library/upload routes needs the upload password plus a verified
+admin identity. Social admin actions (delete comment, ban) accept a verified admin
+identity or the optional `ADMIN_API_KEY` secret in `X-Admin-Key`.
 
-Recommended binding in wrangler.toml (example)
+## Bindings to create
 
-name = "beis-anytime-api"
-main = "worker/index.js"
+| Binding | Type | Used for |
+| --- | --- | --- |
+| `NEW_VIDEO_BUCKET` | R2 | library videos and thumbnails |
+| `DB` | D1 | community posts (`posts` table) |
+| `VIEWS_KV` | KV | view counts |
+| `LIKES_KV` | KV | likes per shiur |
+| `COMMENTS_KV` | KV | comments per shiur |
+| `USERS_KV` | KV | display names |
+| `BANS_KV` | KV | banned commenters |
+| `UPLOAD_LOGS_KV` | KV | upload history |
 
-[vars]
-ADMIN_EMAIL = "beisanytime@gmail.com"
-# ADMIN_API_KEY = "set_a_secret_here"
+D1 schema (run once):
 
-[[kv_namespaces]]
-binding = "VIEWS_KV"
-id = "PUT_YOUR_KV_ID_HERE"
+```sql
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_email TEXT NOT NULL,
+  display_name TEXT,
+  avatar_url TEXT,
+  content TEXT NOT NULL,
+  created_at INTEGER NOT NULL DEFAULT (unixepoch())
+);
+```
 
-[[kv_namespaces]]
-binding = "LIKES_KV"
-id = "PUT_YOUR_KV_ID_HERE"
+## Variables and secrets
 
-[[kv_namespaces]]
-binding = "COMMENTS_KV"
-id = "PUT_YOUR_KV_ID_HERE"
+- `UPLOAD_PASSWORD` (secret) — admin password for uploads
+- `ADMIN_EMAILS` — comma-separated admin Google addresses (default `joshuacalvert1@gmail.com`)
+- `GOOGLE_CLIENT_ID` — ID-token audience (defaults to the public web client id)
+- `ALLOWED_ORIGINS` — comma-separated origins; unset keeps `*`
+- `R2_PUBLIC_URL` — public R2 domain (default `https://r2.beisanytime.com`)
+- `ADMIN_API_KEY` (optional secret) — alternative to a Google identity for social admin actions
 
-[[kv_namespaces]]
-binding = "USERS_KV"
-id = "PUT_YOUR_KV_ID_HERE"
+## Deploy
 
-[[kv_namespaces]]
-binding = "BANS_KV"
-id = "PUT_YOUR_KV_ID_HERE"
+```bash
+cd worker
+wrangler deploy            # bundles worker/index.js
+wrangler secret put UPLOAD_PASSWORD
+```
 
-Notes and security
-- The worker in this repository trusts the header `X-User-Email` to identify the user. That means a malicious client could spoof that header. For production, verify Google ID tokens server-side and use the verified email.
-- Admin operations are allowed when `X-User-Email` matches `ADMIN_EMAIL` OR when `X-Admin-Key` header matches `ADMIN_API_KEY`. Keep `ADMIN_API_KEY` secret and do not embed it into browser JS.
+Recommended `wrangler.toml`:
 
-How to deploy
-1. Create KV namespaces in the Cloudflare dashboard or via `wrangler kv:namespace create NAME` and copy their IDs.
-2. Add the IDs and ADMIN_EMAIL to `wrangler.toml` as shown above.
-3. Deploy with `wrangler publish`.
+```toml
+name = "beis-api"
+main = "index.js"
+compatibility_date = "2025-01-01"
 
-How the site interacts
-- The site uses two separate origins: the main API (set in `API_BASE_URL` inside `script.js`) and the features worker (views/likes/comments/users) which should be set in `WORKER_BASE_URL` inside `script.js`.
-- Client uses endpoints under `/api/...` on the worker origin. Example calls:
-  - POST /api/views/increment  { id }
-  - GET /api/views/:id
-  - GET /api/likes/:id
-  - POST /api/likes/:id  (header X-User-Email required)
-  - GET /api/comments/:id
-  - POST /api/comments/:id  (header X-User-Email required, body { text })
-  - DELETE /api/comments/:id/:commentId (admin-only)
-  - GET /api/users/:email
-  - PUT /api/users/:email  (header X-User-Email must match or admin)
-  - POST /api/ban  (admin-only)
+routes = [
+  { pattern = "api.beisanytime.com", custom_domain = true }
+]
+```
 
-  Client setup notes
-  - In your site `script.js` set `WORKER_BASE_URL` to your worker URL (for example: `https://beisanytime-features.workers.dev`).
-  - Keep `API_BASE_URL` pointing at your existing API if needed. The worker features will use `WORKER_BASE_URL`.
+The `custom_domain` route requires `beisanytime.com` to be on the same Cloudflare
+account; the Workers dashboard equivalent is *Settings → Domains & Routes → Add
+custom domain*. Until it is added, the site and app have no working API URL.
 
-Testing with curl (PowerShell examples)
+## Smoke tests
 
-# Get views
-curl "https://<YOUR_WORKER>/api/views/shiur-123"
+```bash
+curl "https://api.beisanytime.com/api/all-shiurim"
+curl "https://api.beisanytime.com/api/views/<shiur-id>"
+curl -X POST "https://api.beisanytime.com/api/views/increment" \
+  -H "Content-Type: application/json" -d '{"id":"<shiur-id>"}'
+curl "https://api.beisanytime.com/api/posts"
 
-# Increment view
-curl -X POST "https://<YOUR_WORKER>/api/views/increment" -H "Content-Type: application/json" -d '{"id":"shiur-123"}'
+# Signed-in comment (401 without a token)
+curl -X POST "https://api.beisanytime.com/api/comments/<shiur-id>" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <google-id-token>" \
+  -d '{"text":"Hello"}'
+```
 
-# Like (requires email header)
-curl -X POST "https://<YOUR_WORKER>/api/likes/shiur-123" -H "X-User-Email: user@example.com"
+## Still open
 
-# Post comment
-curl -X POST "https://<YOUR_WORKER>/api/comments/shiur-123" -H "Content-Type: application/json" -H "X-User-Email: user@example.com" -d '{"text":"Hello"}'
-
-
-Next steps / Improvements
-- Verify Google ID tokens in the worker (recommended) to prevent spoofing of X-User-Email.
-- Rate-limit comments/likes per IP or per user to prevent abuse.
-- Move admin-only UI actions to a server-side admin console that stores ADMIN_API_KEY securely.
-
+- Comment and like writes are not rate limited.
+- The legacy `beis-anytime-api` worker is still queried for old shiurim; retire it once
+  the library is fully in R2.

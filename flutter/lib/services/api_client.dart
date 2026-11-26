@@ -239,20 +239,18 @@ class ApiClient {
     return CommentResponse.fromJson(_decodeObject(payload)).comments;
   }
 
+  /// The worker takes the author from the verified ID token, so no email is sent.
   Future<void> postComment({
     required String shiurId,
     required String text,
-    required String email,
+    required UserProfile user,
   }) async {
     await _send(
       'POST',
       _url(
         '${ApiConfig.videoApi}/api/comments/${Uri.encodeComponent(shiurId)}',
       ),
-      headers: <String, String>{
-        'Content-Type': 'application/json',
-        'X-User-Email': email,
-      },
+      headers: _authHeaders(user, json: true),
       body: jsonEncode(<String, String>{'text': text}),
     );
   }
@@ -260,7 +258,7 @@ class ApiClient {
   Future<void> deleteComment({
     required String shiurId,
     required String commentId,
-    required String email,
+    required UserProfile user,
   }) async {
     await _send(
       'DELETE',
@@ -268,28 +266,30 @@ class ApiClient {
         '${ApiConfig.videoApi}/api/comments/'
         '${Uri.encodeComponent(shiurId)}/${Uri.encodeComponent(commentId)}',
       ),
-      headers: <String, String>{'X-User-Email': email},
+      headers: _authHeaders(user),
     );
   }
 
   // MARK: - Likes and views
 
-  Future<LikesResponse> getLikes(String shiurId) async {
+  /// [user] is optional; without it the worker cannot tell whether this viewer liked it.
+  Future<LikesResponse> getLikes(String shiurId, {UserProfile? user}) async {
     final payload = await _send(
       'GET',
       _url('${ApiConfig.videoApi}/api/likes/${Uri.encodeComponent(shiurId)}'),
+      headers: user == null ? const <String, String>{} : _authHeaders(user),
     );
     return LikesResponse.fromJson(_decodeObject(payload));
   }
 
   Future<void> toggleLike({
     required String shiurId,
-    required String email,
+    required UserProfile user,
   }) async {
     await _send(
       'POST',
       _url('${ApiConfig.videoApi}/api/likes/${Uri.encodeComponent(shiurId)}'),
-      headers: <String, String>{'X-User-Email': email},
+      headers: _authHeaders(user),
     );
   }
 
@@ -320,13 +320,20 @@ class ApiClient {
   // Every admin route on the worker requires `X-Upload-Password` plus the Google
   // identity, so both travel with each request.
 
+  /// Identity headers for the social routes: the worker only trusts the ID token.
+  Map<String, String> _authHeaders(UserProfile user, {bool json = false}) {
+    return <String, String>{
+      if (user.idToken.isNotEmpty) 'Authorization': 'Bearer ${user.idToken}',
+      if (json) 'Content-Type': 'application/json',
+    };
+  }
+
   Map<String, String> _adminHeaders(
     AdminCredentials credentials, {
     bool json = false,
   }) {
     return <String, String>{
       'X-Upload-Password': credentials.password,
-      'X-User-Email': credentials.email,
       'X-User-Name': credentials.name,
       if (credentials.idToken.isNotEmpty)
         'Authorization': 'Bearer ${credentials.idToken}',
