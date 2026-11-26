@@ -8,6 +8,8 @@
  * It also proxies requests to the "old" worker to ensure legacy videos remain accessible.
  */
 
+import { authenticateAdmin } from './google-auth.js';
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -18,10 +20,22 @@ export default {
     const OLD_WORKER_URL = 'https://beis-anytime-api.beisanytime.workers.dev';
     const R2_PUBLIC_BASE = env.R2_PUBLIC_URL || 'https://r2.beisanytime.com';
 
+    // Set ALLOWED_ORIGINS (comma-separated) to lock admin endpoints to the real site.
+    // Unset keeps the previous "*" behaviour so the existing deployment keeps working.
+    const allowedOrigins = String(env.ALLOWED_ORIGINS || '')
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(Boolean);
+    const requestOrigin = request.headers.get("Origin") || '';
+    const allowOrigin = allowedOrigins.length === 0
+      ? "*"
+      : (allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0]);
+
     const corsHeaders = {
-      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Origin": allowOrigin,
+      "Vary": "Origin",
       "Access-Control-Allow-Methods": "GET, HEAD, POST, PUT, DELETE, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Range, X-User-Email, X-Admin-Key, X-Upload-Password, X-User-Name",
+      "Access-Control-Allow-Headers": "Content-Type, Range, Authorization, X-User-Email, X-Admin-Key, X-Upload-Password, X-User-Name",
       "Access-Control-Expose-Headers": "Accept-Ranges, Content-Length, Content-Range, ETag, Content-Type",
     };
 
@@ -29,14 +43,32 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    // --- Helper: Verify upload password ---
-    const verifyPassword = (request) => {
-      const password = request.headers.get('X-Upload-Password');
-      if (!env.UPLOAD_PASSWORD) {
-        console.error('UPLOAD_PASSWORD environment variable is not set');
+    // --- Helpers: JSON responses and complete bucket listing ---
+    const jsonResponse = (body, status = 200) => new Response(JSON.stringify(body), {
+      status,
+      headers: { ...corsHeaders, "Content-Type": "application/json" }
+    });
+
+    // R2 returns at most 1000 keys per call; follow the cursor so big libraries are complete.
+    const listAllKeys = async (prefix) => {
+      const objects = [];
+      let cursor;
+      do {
+        const page = await env.NEW_VIDEO_BUCKET.list(prefix ? { prefix, cursor } : { cursor });
+        objects.push(...page.objects);
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+      return objects;
+    };
+
+    // --- Helper: Verify upload password AND a verified admin Google identity ---
+    const verifyPassword = async (request) => {
+      const result = await authenticateAdmin(request, env);
+      if (!result.ok) {
+        console.error(`Admin request rejected: ${result.error}`);
         return false;
       }
-      return password === env.UPLOAD_PASSWORD;
+      return true;
     };
 
     // --- Helper: Log upload to KV ---
@@ -171,15 +203,16 @@ export default {
     // --- Route: GET /api/debug-r2 ---
     // Helpful to see exactly what's in your bucket
     if (path === "/api/debug-r2" && method === "GET") {
-      const objects = await env.NEW_VIDEO_BUCKET.list();
-      return new Response(JSON.stringify(objects), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" }
-      });
+      if (!(await verifyPassword(request))) {
+        return jsonResponse({ error: 'Unauthorized' }, 401);
+      }
+      const objects = await listAllKeys();
+      return jsonResponse({ objects });
     }
 
     // --- Route: POST /api/admin/refresh-thumbnails ---
     if (path === "/api/admin/refresh-thumbnails" && method === "POST") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -220,7 +253,7 @@ export default {
 
     // --- Route: POST /api/admin/cleanup-malformed-thumbnails ---
     if (path === "/api/admin/cleanup-malformed-thumbnails" && method === "POST") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -231,8 +264,8 @@ export default {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
       }
-      const objects = await env.NEW_VIDEO_BUCKET.list({ prefix: "thumbnails/" });
-      const malformed = objects.objects.filter(object => /\.(mp4|mov|m4v)$/i.test(object.key));
+      const objects = await listAllKeys("thumbnails/");
+      const malformed = objects.filter(object => /\.(mp4|mov|m4v)$/i.test(object.key));
       await Promise.all(malformed.map(object => env.NEW_VIDEO_BUCKET.delete(object.key)));
       return new Response(JSON.stringify({ deleted: malformed.length }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -241,7 +274,7 @@ export default {
 
     // --- Route: GET /api/admin/shiurim ---
     if (path === "/api/admin/shiurim" && method === "GET") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -251,7 +284,7 @@ export default {
 
     // --- Route: DELETE /api/admin/shiurim/:id ---
     if (path.startsWith("/api/admin/shiurim/") && method === "DELETE") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -284,8 +317,8 @@ export default {
         const oldPromise = fetch(`${OLD_WORKER_URL}/api/all-shiurim`).then(r => r.ok ? r.json() : []);
 
         // 2. List from R2
-        const objects = await env.NEW_VIDEO_BUCKET.list();
-        const r2Shiurim = objects.objects
+        const objects = await listAllKeys();
+        const r2Shiurim = objects
           .filter(obj => !/^thumbnails\//i.test(obj.key) && /\.(mp4|mov|m4a|mp3)$/i.test(obj.key))
           .map(obj => parseFilename(obj.key))
           .filter(s => s !== null);
@@ -345,9 +378,26 @@ export default {
     // Flow: start-upload -> upload-part (x N) -> complete-upload
     // ============================================================
 
+    // --- Route: POST /api/admin/abort-upload ---
+    // Lets the client release a half-finished multipart upload instead of leaving orphaned parts.
+    if (path === "/api/admin/abort-upload" && method === "POST") {
+      if (!(await verifyPassword(request))) {
+        return jsonResponse({ error: 'Unauthorized' }, 401);
+      }
+      try {
+        const { r2Key, uploadId } = await request.json();
+        if (!r2Key || !uploadId) return jsonResponse({ error: 'Missing r2Key or uploadId' }, 400);
+        const multipartUpload = env.NEW_VIDEO_BUCKET.resumeMultipartUpload(r2Key, uploadId);
+        await multipartUpload.abort();
+        return jsonResponse({ success: true });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
+    }
+
     // --- Route: POST /api/admin/prepare-upload ---
     if (path === "/api/admin/prepare-upload" && method === "POST") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -403,7 +453,7 @@ export default {
 
     // --- Route: PUT /api/admin/upload-part ---
     if (path === "/api/admin/upload-part" && method === "PUT") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -433,7 +483,7 @@ export default {
 
     // --- Route: POST /api/admin/complete-upload ---
     if (path === "/api/admin/complete-upload" && method === "POST") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -470,7 +520,7 @@ export default {
 
     // --- Route: PUT /api/upload-proxy ---
     if (path === "/api/upload-proxy" && method === "PUT") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -493,7 +543,7 @@ export default {
 
     // --- Route: GET /api/admin/upload-logs ---
     if (path === "/api/admin/upload-logs" && method === "GET") {
-      if (!verifyPassword(request)) {
+      if (!(await verifyPassword(request))) {
         return new Response(JSON.stringify({ error: 'Unauthorized' }), {
           status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" }
         });
@@ -518,9 +568,14 @@ export default {
     }
 
     // --- Default: Proxy everything else to the old worker ---
+    // Never forward credentials or identity headers to a third-party worker.
+    const forwardedHeaders = new Headers(request.headers);
+    ['authorization', 'x-upload-password', 'x-user-email', 'x-user-name', 'cookie'].forEach(header => {
+      forwardedHeaders.delete(header);
+    });
     return fetch(`${OLD_WORKER_URL}${path}`, {
       method: method,
-      headers: request.headers,
+      headers: forwardedHeaders,
       body: request.body
     });
   }

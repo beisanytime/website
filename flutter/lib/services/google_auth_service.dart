@@ -94,7 +94,7 @@ class GoogleAuthService {
 
     try {
       final account = await googleSignIn.authenticate();
-      return _profileFrom(account);
+      return await _profileFrom(account);
     } on GoogleSignInException catch (error) {
       if (error.code == GoogleSignInExceptionCode.canceled) {
         throw const AuthException('Sign-in cancelled', cancelled: true);
@@ -120,12 +120,22 @@ class GoogleAuthService {
     }
   }
 
-  UserProfile _profileFrom(GoogleSignInAccount account) {
+  Future<UserProfile> _profileFrom(GoogleSignInAccount account) async {
+    // The ID token is the only thing the workers can verify; without it admin
+    // and community writes are rejected. Missing it is not fatal for browsing.
+    String idToken = '';
+    try {
+      idToken = account.authentication.idToken ?? '';
+    } on GoogleSignInException {
+      idToken = '';
+    }
+
     final name = account.displayName;
     return UserProfile(
       name: name != null && name.trim().isNotEmpty ? name : account.email,
       email: account.email,
       picture: account.photoUrl ?? '',
+      idToken: idToken,
     );
   }
 }

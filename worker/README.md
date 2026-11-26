@@ -30,11 +30,15 @@ The main API worker now requires server-side password validation and Google Sign
 Environment variables (set via Cloudflare dashboard or `wrangler secret put`):
 - UPLOAD_PASSWORD — The admin password (secret, not in client code)
 - R2_PUBLIC_URL — Public R2 domain (optional, defaults to https://r2.beisanytime.com)
+- ADMIN_EMAILS — Comma-separated admin Google addresses (optional; defaults to joshuacalvert1@gmail.com)
+- GOOGLE_CLIENT_ID — OAuth web client id used as the ID-token audience (optional; defaults to the value in google-auth.js)
+- ALLOWED_ORIGINS — Comma-separated origins allowed to call the worker (optional; unset keeps `*`)
 
 KV Namespace to create and bind:
 - UPLOAD_LOGS_KV — Stores upload logs (who uploaded what, when)
 
-Admin routes (all require X-Upload-Password header):
+Admin routes (all require X-Upload-Password *and* a verified Google ID token in
+`Authorization: Bearer <id_token>`):
 - POST /api/admin/prepare-upload — Start multipart upload (also requires X-User-Email)
 - PUT /api/admin/upload-part — Upload chunk
 - POST /api/admin/complete-upload — Finalize upload
@@ -44,6 +48,11 @@ Admin routes (all require X-Upload-Password header):
 - POST /api/admin/refresh-thumbnails — Regenerate thumbnails
 - POST /api/admin/cleanup-malformed-thumbnails — Fix bad thumbnails
 - GET /api/admin/upload-logs — View upload history
+
+The ID token is verified in `worker/google-auth.js` (signature via Google's JWKS, plus
+issuer, audience, expiry and verified-email checks). Both workers import that file, so
+deploy with `wrangler deploy` (or `wrangler dev`) from a directory that contains it — a
+single-file copy pasted into the dashboard will not resolve the import.
 
 Setup:
 1. Set the upload password: wrangler secret put UPLOAD_PASSWORD

@@ -138,7 +138,7 @@ class ApiClient {
       if (message != null && message.isNotEmpty && message != 'Unauthorized') {
         return message;
       }
-      return 'Not authorized — check your upload password';
+      return 'Not authorized — sign in again and check your upload password';
     }
     return message ?? 'Server error: ${response.statusCode}';
   }
@@ -200,6 +200,8 @@ class ApiClient {
         .toList(growable: false);
   }
 
+  /// The worker derives the author from the verified ID token, so only the
+  /// content is sent.
   Future<void> createPost({
     required String content,
     required UserProfile user,
@@ -207,23 +209,21 @@ class ApiClient {
     await _send(
       'POST',
       _url('${ApiConfig.communityApi}/api/posts'),
-      headers: const <String, String>{'Content-Type': 'application/json'},
-      body: jsonEncode(<String, dynamic>{
-        'content': content,
-        'user': <String, dynamic>{
-          'name': user.name,
-          'email': user.email,
-          'picture': user.picture,
-        },
-      }),
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+        if (user.idToken.isNotEmpty) 'Authorization': 'Bearer ${user.idToken}',
+      },
+      body: jsonEncode(<String, dynamic>{'content': content}),
     );
   }
 
-  Future<void> deletePost({required int id, required String email}) async {
+  Future<void> deletePost({required int id, required UserProfile user}) async {
     await _send(
       'DELETE',
       _url('${ApiConfig.communityApi}/api/posts/$id'),
-      headers: <String, String>{'X-User-Email': email},
+      headers: <String, String>{
+        if (user.idToken.isNotEmpty) 'Authorization': 'Bearer ${user.idToken}',
+      },
     );
   }
 
@@ -328,6 +328,8 @@ class ApiClient {
       'X-Upload-Password': credentials.password,
       'X-User-Email': credentials.email,
       'X-User-Name': credentials.name,
+      if (credentials.idToken.isNotEmpty)
+        'Authorization': 'Bearer ${credentials.idToken}',
       if (json) 'Content-Type': 'application/json',
     };
   }

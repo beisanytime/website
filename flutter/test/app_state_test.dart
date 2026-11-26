@@ -168,7 +168,7 @@ void main() {
     await state.signIn(
       const UserProfile(
         name: 'Josh',
-        email: 'beisanytime@gmail.com',
+        email: 'joshuacalvert1@gmail.com',
         picture: '',
       ),
     );
@@ -179,7 +179,7 @@ void main() {
     await state.setUploadPassword('  hunter2  ');
     expect(state.uploadPassword, 'hunter2');
     expect(state.adminCredentials?.password, 'hunter2');
-    expect(state.adminCredentials?.email, 'beisanytime@gmail.com');
+    expect(state.adminCredentials?.email, 'joshuacalvert1@gmail.com');
 
     await state.setUploadPassword('   ');
     expect(state.uploadPassword, isNull);

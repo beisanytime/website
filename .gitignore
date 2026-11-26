@@ -6,3 +6,8 @@ flutter/.pub/
 flutter/build/
 flutter/.dart_tool/
 flutter/.packages
+flutter/.flutter-plugins-dependencies
+
+# macOS / editor noise
+.DS_Store
+**/.DS_Store

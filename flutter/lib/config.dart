@@ -16,7 +16,6 @@ class ApiConfig {
 
   /// Accounts allowed to publish, mirroring `ADMIN_EMAILS` on the web app.
   static const Set<String> adminEmails = {
-    'beisanytime@gmail.com',
     'joshuacalvert1@gmail.com',
   };
 

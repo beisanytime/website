@@ -136,6 +136,7 @@ class AppState extends ChangeNotifier {
       email: currentUser.email,
       name: currentUser.name,
       password: password,
+      idToken: currentUser.idToken,
     );
   }
 

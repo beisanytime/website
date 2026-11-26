@@ -2,6 +2,19 @@
 // Beis Anytime - Application Logic
 // =================================================================================
 
+// --- Escaping helpers ---
+// API, D1 and comment data is rendered with template strings, so escape at the sink.
+// escapeAttr escapes quotes too, so it is safe for both attributes and text.
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+}[char]));
+
+const escapeAttr = escapeHtml;
+
 // --- Lazy Loading ---
 const imageObserver = new IntersectionObserver((entries, observer) => {
     entries.forEach(entry => {
@@ -38,6 +51,8 @@ window.handleCredentialResponse = (response) => {
             picture: payload.picture || ''
         };
         localStorage.setItem('googleUser', JSON.stringify(user));
+        // The raw ID token is what the workers verify; the stored user object is display data only.
+        localStorage.setItem('googleCredential', response.credential);
         window.dispatchEvent(new CustomEvent('google-signin-success', { detail: user }));
     } catch (error) {
         console.error('Google sign-in failed:', error);
@@ -148,13 +163,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // 2. API for Video Likes/Comments (The original KV Worker)
     const VIDEO_API_URL = 'https://beis-anytime-viewsapi.beisanytime.workers.dev';
 
-    const ADMIN_EMAILS = ['beisanytime@gmail.com', 'joshuacalvert1@gmail.com'];
+    // Display-only allow-list. Authorization is enforced by the workers from a verified
+    // Google ID token (env.ADMIN_EMAILS); this only decides which UI to show.
+    const ADMIN_EMAILS = ['joshuacalvert1@gmail.com'];
     const MAIN_API_URL = 'https://beis-api.beisanytime.workers.dev';
 
     // --- State ---
     let allShiurimCache = [];
     let currentUser = null;
     let capturedThumbnailDataUrl = null;
+    let activeShortcutHandler = null;
 
     // --- DOM ---
     const contentArea = document.getElementById('app-content');
@@ -212,6 +230,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const getStoredPassword = () => sessionStorage.getItem('uploadPassword');
     const setStoredPassword = (pwd) => sessionStorage.setItem('uploadPassword', pwd);
 
+    // Sent to the workers, which verify the signature before trusting the email.
+    // A forged localStorage value gets a 401/403 rather than access.
+    const getAuthHeaders = () => {
+        const credential = localStorage.getItem('googleCredential');
+        return credential ? { Authorization: `Bearer ${credential}` } : {};
+    };
+
     // Authenticated fetch for admin endpoints (sends password + Google email)
     const fetchAdmin = async (endpoint, options = {}) => {
         const password = getStoredPassword();
@@ -219,7 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
             renderPasswordModal('admin');
             return null;
         }
-        const headers = { ...options.headers, 'X-Upload-Password': password };
+        const headers = { ...options.headers, ...getAuthHeaders(), 'X-Upload-Password': password };
         if (currentUser) {
             headers['X-User-Email'] = currentUser.email;
             headers['X-User-Name'] = currentUser.name;
@@ -262,10 +287,13 @@ document.addEventListener('DOMContentLoaded', () => {
                     body: chunk,
                     headers
                 });
-                const partData = await partResponse.json();
+                let partData = null;
+                try { partData = await partResponse.json(); } catch { /* non-JSON error body */ }
 
-                if (!partResponse.ok || partData.error || !partData.etag) {
-                    throw new Error(partData.error || `Failed to upload part ${partNumber}`);
+                if (!partResponse.ok || !partData || partData.error || !partData.etag) {
+                    throw new Error(partData && partData.error
+                        ? partData.error
+                        : `Failed to upload part ${partNumber} (HTTP ${partResponse.status})`);
                 }
 
                 uploadedParts[partIndex] = {
@@ -282,6 +310,19 @@ document.addEventListener('DOMContentLoaded', () => {
         );
 
         return uploadedParts;
+    };
+
+    // Release a half-finished multipart upload so orphaned parts are not left in R2.
+    const abortMultipartUpload = async ({ r2Key, uploadId, headers }) => {
+        try {
+            await fetch(`${MAIN_API_URL}/api/admin/abort-upload`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...headers },
+                body: JSON.stringify({ r2Key, uploadId })
+            });
+        } catch (error) {
+            console.error('Failed to abort multipart upload:', error);
+        }
     };
 
     // --- Toast Helper ---
@@ -326,7 +367,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const toast = document.createElement('div');
         toast.className = `toast toast-${type}`;
         toast.innerHTML = `
-            <div class="toast-content">${message}</div>
+            <div class="toast-content">${escapeHtml(message)}</div>
         `;
         container.appendChild(toast);
         setTimeout(() => {
@@ -385,7 +426,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         if (filtered.length === 0) {
-            grid.innerHTML = renderEmptyState(`No results for "${query}"`);
+            grid.innerHTML = renderEmptyState(`No results for "${escapeHtml(query)}"`);
         } else {
             renderVideoGrid(filtered, grid);
         }
@@ -417,14 +458,14 @@ document.addEventListener('DOMContentLoaded', () => {
         toast.className = 'post-notification';
         toast.innerHTML = `
             <div class="notification-header">
-                <img src="${post.avatar_url}" class="notif-avatar">
+                <img src="${escapeAttr(post.avatar_url)}" class="notif-avatar">
                 <div class="notif-info">
                     <strong>Latest Announcement</strong>
-                    <span>${post.display_name}</span>
+                    <span>${escapeHtml(post.display_name)}</span>
                 </div>
                 <button class="notif-close">&times;</button>
             </div>
-            <div class="notif-body">${post.content.length > 100 ? post.content.substring(0, 97) + '...' : post.content}</div>
+            <div class="notif-body">${escapeHtml(post.content.length > 100 ? post.content.substring(0, 97) + '...' : post.content)}</div>
             <button class="btn-notif" onclick="loadPage('community'); this.parentElement.classList.add('hide'); setTimeout(()=>this.parentElement.remove(), 300);">Read Full Post</button>
         `;
         document.body.appendChild(toast);
@@ -452,7 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 allShiurimCache = data;
                 try { sessionStorage.setItem('allShiurim', JSON.stringify(data)); } catch (e) { }
             }
-            return data;
+            return Array.isArray(data) ? data : [];
         } catch (e) { console.error('Failed to fetch shiurim', e); return []; }
     };
 
@@ -479,7 +520,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (v.rabbi) card.setAttribute('data-rabbi', v.rabbi);
 
             const isTime4Mishna = v.rabbi && v.rabbi.toLowerCase() === 'time4mishna';
-            const thumb = isTime4Mishna ? 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=1000' : (v.thumbnailDataUrl || v.thumbnailUrl || '');
+            const thumb = isTime4Mishna
+                ? 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&q=80&w=1000'
+                : (v.thumbnailDataUrl || v.thumbnailUrl || 'images/placeholder-shiur.png');
             const progress = parseFloat(localStorage.getItem(`vid_progress_${v.id}`) || 0);
             const duration = parseFloat(localStorage.getItem(`vid_duration_${v.id}`) || 0);
             const percent = (progress && duration) ? (progress / duration) * 100 : 0;
@@ -487,10 +530,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             card.innerHTML = `
         <div class="thumb-wrapper">
-            <img data-src="${thumb}" class="thumb-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9' fill='%23f3f4f6'%3E%3C/svg%3E" alt="Thumbnail" loading="lazy">
+            <img data-src="${escapeAttr(thumb)}" class="thumb-img" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9' fill='%23f3f4f6'%3E%3C/svg%3E" alt="Thumbnail" loading="lazy">
             <div class="rabbi-badge">
                 <span class="rabbi-dot"></span>
-                ${formatRabbiName(v.rabbi)}
+                ${escapeHtml(formatRabbiName(v.rabbi))}
             </div>
             ${percent > 0 ? `
                 <div class="progress-bar-container">
@@ -502,8 +545,8 @@ document.addEventListener('DOMContentLoaded', () => {
             </button>
         </div>
         <div class="card-content">
-            <h3 class="card-title">${v.title}</h3>
-            ${v.tags ? v.tags.map(t => `<span class="tag-badge">${t}</span>`).join('') : ''}
+            <h3 class="card-title">${escapeHtml(v.title)}</h3>
+            ${v.tags ? v.tags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('') : ''}
             <span class="card-date">${v.date ? new Date(v.date).toLocaleDateString() : ''}</span>
         </div>
     `;
@@ -557,7 +600,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="mobile-search-container">
                     <div class="search-wrapper">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="mobileSearch" class="search-input" placeholder="Search shiurim..." value="${document.getElementById('globalSearch')?.value || ''}">
+                        <input type="text" id="mobileSearch" class="search-input" placeholder="Search shiurim..." value="${escapeAttr(document.getElementById('globalSearch')?.value || '')}">
                     </div>
                 </div>
                 <h1 style="margin-bottom:30px;">All Shiurim</h1>
@@ -607,7 +650,7 @@ document.addEventListener('DOMContentLoaded', () => {
             ${isAdmin ? `
             <div class="post-composer">
                 <div class="composer-header">
-                    <img src="${currentUser.picture}" class="composer-avatar">
+                    <img src="${escapeAttr(currentUser.picture)}" class="composer-avatar">
                     <span class="composer-label">Posting as admin</span>
                 </div>
                 <textarea id="postInput" class="composer-textarea" placeholder="Write an official announcement..." rows="3"></textarea>
@@ -642,12 +685,18 @@ document.addEventListener('DOMContentLoaded', () => {
                     btn.disabled = true;
                     btn.textContent = "Posting...";
 
-                    await workerFetch(COMMUNITY_API_URL, '/api/posts', {
+                    const result = await workerFetch(COMMUNITY_API_URL, '/api/posts', {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ content: txt, user: currentUser })
+                        headers: { 'Content-Type': 'application/json', ...getAuthHeaders() },
+                        body: JSON.stringify({ content: txt })
                     });
 
+                    if (!result) {
+                        showToast('Could not post. Please sign in again.', 'error');
+                        btn.disabled = false;
+                        btn.textContent = 'Post';
+                        return;
+                    }
                     loadPage('community');
                 };
             }
@@ -669,25 +718,33 @@ document.addEventListener('DOMContentLoaded', () => {
             list.innerHTML = posts.map(p => `
         <div class="post-card">
             <div class="post-header">
-                <img src="${p.avatar_url}" class="post-avatar">
+                <img src="${escapeAttr(p.avatar_url)}" class="post-avatar">
                 <div class="post-meta">
-                    <span class="post-author">${p.display_name} <i class="fas fa-check-circle" style="color:var(--color-accent); font-size:0.75rem; margin-left:4px;" title="Verified Admin"></i></span>
+                    <span class="post-author">${escapeHtml(p.display_name)} <i class="fas fa-check-circle" style="color:var(--color-accent); font-size:0.75rem; margin-left:4px;" title="Verified Admin"></i></span>
                     <span class="post-time">${timeAgo(new Date(p.created_at * 1000))}</span>
                 </div>
                 ${(isAdmin) ? `
-                    <button class="post-delete-btn" onclick="deletePost(${p.id})" title="Delete post"><i class="fas fa-trash-alt"></i></button>
+                    <button class="post-delete-btn" data-delete-post="${escapeAttr(p.id)}" title="Delete post"><i class="fas fa-trash-alt"></i></button>
                 ` : ''}
             </div>
-            <div class="post-content">${p.content}</div>
+            <div class="post-content">${escapeHtml(p.content)}</div>
         </div>
     `).join('');
 
-            window.deletePost = async (id) => {
+            const deletePost = async (id) => {
                 if (confirm('Delete post?')) {
-                    await workerFetch(COMMUNITY_API_URL, `/api/posts/${id}`, { method: 'DELETE', headers: { 'X-User-Email': currentUser.email } });
+                    const result = await workerFetch(COMMUNITY_API_URL, `/api/posts/${encodeURIComponent(id)}`, {
+                        method: 'DELETE',
+                        headers: getAuthHeaders()
+                    });
+                    if (!result) showToast('Could not delete the post. Please sign in again.', 'error');
                     loadPage('community');
                 }
             };
+
+            list.querySelectorAll('[data-delete-post]').forEach(btn => {
+                btn.onclick = () => deletePost(btn.dataset.deletePost);
+            });
         },
 
         speakers: async () => {
@@ -729,7 +786,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="width:80px; height:80px; background:var(--bg-surface-hover); border-radius:50%; display:flex; align-items:center; justify-content:center; margin-bottom:16px; font-size:2rem; color:var(--text-muted);">
                 <i class="fas ${s.icon}"></i>
             </div>
-            <h3 style="margin:0;">${s.name}</h3>
+            <h3 style="margin:0;">${escapeHtml(s.name)}</h3>
         `;
                 el.onclick = (e) => { e.preventDefault(); loadPage('speaker', { rabbi: s.id }); };
                 grid.appendChild(el);
@@ -749,9 +806,9 @@ document.addEventListener('DOMContentLoaded', () => {
                          <h1>Time4Mishna</h1>
                          <p>${filtered.length} Shiurim available</p>
                      </div>
-                     <button class="btn btn-primary" onclick="loadPage('upload_time4mishna')">
+                     ${canUpload ? `<button class="btn btn-primary" onclick="loadPage('upload_time4mishna')">
                         <i class="fas fa-upload"></i> Upload Mishna
-                     </button>
+                     </button>` : ''}
                  </div>
                  <div class="grid-videos"></div>
              `;
@@ -764,7 +821,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const filtered = data.filter(s => s.rabbi && s.rabbi.toLowerCase().replace(/_/g, ' ') === normalizedParam);
             contentArea.innerHTML = `
         <div style="margin-bottom: 30px;">
-            <h1>${formatRabbiName(params.rabbi)}</h1>
+            <h1>${escapeHtml(formatRabbiName(params.rabbi))}</h1>
             <p>${filtered.length} Shiurim available</p>
         </div>
         <div class="grid-videos"></div>
@@ -812,13 +869,13 @@ document.addEventListener('DOMContentLoaded', () => {
                                     <i class="fas fa-headphones" id="audioPlayIcon"></i>
                                 </div>
                                 <div class="audio-player-info">
-                                    <div class="audio-player-title">${shiur.title}</div>
+                                    <div class="audio-player-title">${escapeHtml(shiur.title)}</div>
                                     <div class="audio-player-rabbi">Time4Mishna</div>
                                 </div>
                                 <audio id="player-video" controls autoplay playsinline preload="auto" style="width:100%; margin-top:16px;"></audio>
                            </div>`
                     : `<div style="position:relative; z-index:1; width:100%; height:100%;">
-                        <video id="player-video" controls playsinline preload="metadata" poster="${shiur.thumbnailDataUrl || shiur.thumbnailUrl || ''}" style="width:100%; height:100%;"></video>
+                        <video id="player-video" controls playsinline preload="metadata" poster="${escapeAttr(shiur.thumbnailDataUrl || shiur.thumbnailUrl || '')}" style="width:100%; height:100%;"></video>
                         <button id="videoPlayButton" class="btn btn-primary" style="position:absolute; left:50%; top:50%; transform:translate(-50%, -50%); display:none;">
                             <i class="fas fa-play"></i> Play
                         </button>
@@ -827,7 +884,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 </div>
 
                 <div class="video-details" id="vDetails">
-                    <h1 class="video-title">${shiur.title}</h1>
+                    <h1 class="video-title">${escapeHtml(shiur.title)}</h1>
 
                     <div class="video-meta-row">
                         <span class="rabbi-badge" style="position:static; margin:0;">
@@ -842,10 +899,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         </button>
                     </div>
 
-                    <div class="video-description">${shiur.description || 'No description provided.'}</div>
+                    <div class="video-description">${shiur.description ? escapeHtml(shiur.description).replace(/\n/g, '<br>') : 'No description provided.'}</div>
 
                     <div style="margin-top:24px; display:flex; flex-wrap:wrap; gap:8px;">
-                        ${shiur.tags ? shiur.tags.map(t => `<span class="tag-badge">${t}</span>`).join('') : ''}
+                        ${shiur.tags ? shiur.tags.map(t => `<span class="tag-badge">${escapeHtml(t)}</span>`).join('') : ''}
                     </div>
 
                     <div class="player-extra-controls" style="margin-top:30px; padding-top:20px; border-top:1px solid var(--border-light); display:flex; align-items:center; gap:12px;">
@@ -863,7 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     ${currentUser ? `
                     <div class="comment-composer">
                         <div style="display:flex; gap:16px;">
-                            <img src="${currentUser.picture}" class="comment-avatar">
+                            <img src="${escapeAttr(currentUser.picture)}" class="comment-avatar">
                             <div style="flex:1;">
                                 <textarea id="commentInput" placeholder="Add a comment..." rows="2"></textarea>
                                 <div style="text-align:right; margin-top:12px;">
@@ -957,9 +1014,10 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!vid) return;
             vid.onloadedmetadata = () => {
                 localStorage.setItem(`vid_duration_${params.id}`, vid.duration);
-                // Resume Playback
-                const savedTime = localStorage.getItem(`vid_progress_${params.id}`);
-                if (savedTime) vid.currentTime = parseFloat(savedTime);
+                // Resume playback, unless a shared start time was requested.
+                const savedTime = parseFloat(localStorage.getItem(`vid_progress_${params.id}`));
+                if (hasStartTime) vid.currentTime = startTime;
+                else if (Number.isFinite(savedTime) && savedTime > 0) vid.currentTime = savedTime;
             };
 
             vid.addEventListener('timeupdate', () => {
@@ -985,7 +1043,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <div class="share-modal">
                         <h3 style="margin-top:0;">Share Shiur</h3>
                         <p style="font-size:0.9rem; color:var(--text-muted);">Copy link to share this Torah.</p>
-                        <input type="text" value="${url}" readonly style="margin-bottom:12px;">
+                        <input type="text" value="${escapeAttr(url)}" readonly style="margin-bottom:12px;">
                         <div style="display:flex; align-items:center; gap:8px; margin-bottom:20px;">
                             <input type="checkbox" id="shareAtTime" style="width:auto;">
                             <label for="shareAtTime" style="font-size:0.85rem;">Start at ${Math.floor(vid.currentTime)}s</label>
@@ -1012,8 +1070,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Check for timestamp in URL
             const urlParams = new URLSearchParams(window.location.search);
-            const startTime = urlParams.get('t');
-            if (startTime) vid.currentTime = parseFloat(startTime);
+            const startTime = parseFloat(urlParams.get('t'));
+            const hasStartTime = Number.isFinite(startTime) && startTime > 0;
+            if (hasStartTime) vid.currentTime = startTime;
 
             // 3. Cinema Mode
             const cinemaBtn = document.getElementById('cinemaToggle');
@@ -1032,17 +1091,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 const allData = await getAllShiurim();
                 const related = allData
                     .filter(s => s.id !== params.id)
-                    .sort((a, b) => (a.rabbi === shiur.rabbi ? -1 : 1) - (b.rabbi === shiur.rabbi ? -1 : 1))
+                    .sort((a, b) => Number(b.rabbi === shiur.rabbi) - Number(a.rabbi === shiur.rabbi))
                     .slice(0, 10);
 
                 const rList = document.getElementById('relatedList');
                 if (rList) {
                     rList.innerHTML = related.map(r => `
-                    <a href="#" class="related-card" data-related-id="${r.id}">
-                        <img data-src="${r.thumbnailDataUrl || r.thumbnailUrl}" class="related-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9' fill='%23f3f4f6'%3E%3C/svg%3E">
+                    <a href="#" class="related-card" data-related-id="${escapeAttr(r.id)}">
+                        <img data-src="${escapeAttr(r.thumbnailDataUrl || r.thumbnailUrl)}" class="related-thumb" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 9' fill='%23f3f4f6'%3E%3C/svg%3E">
                         <div class="related-info">
-                            <h4>${r.title}</h4>
-                            <span>${formatRabbiName(r.rabbi)}</span>
+                            <h4>${escapeHtml(r.title)}</h4>
+                            <span>${escapeHtml(formatRabbiName(r.rabbi))}</span>
                         </div>
                     </a>
                 `).join('');
@@ -1068,6 +1127,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     case 'f': if (document.fullscreenElement) document.exitFullscreen(); else vid.requestFullscreen(); break;
                 }
             };
+            activeShortcutHandler = handleShortcuts;
             document.addEventListener('keydown', handleShortcuts);
 
             // 6. Views
@@ -1111,7 +1171,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (!currentUser) return showToast('Please sign in', 'error');
                     await workerFetch(VIDEO_API_URL, `/api/likes/${encodeURIComponent(params.id)}`, {
                         method: 'POST',
-                        headers: { 'X-User-Email': currentUser.email }
+                        headers: { 'X-User-Email': currentUser.email, ...getAuthHeaders() }
                     });
                 };
 
@@ -1162,15 +1222,19 @@ document.addEventListener('DOMContentLoaded', () => {
                     list.innerHTML = res.comments.map(c => `
                 <div class="comment-item" style="padding:16px;">
                     <div class="comment-header" style="margin-bottom:8px;">
-                        <div style="font-weight:700; font-size:0.9rem; color:var(--text-main);">${c.displayName || c.email}</div>
+                        <div style="font-weight:700; font-size:0.9rem; color:var(--text-main);">${escapeHtml(c.displayName || c.email)}</div>
                         <div style="font-size:0.75rem; color:var(--text-muted);">${new Date(c.createdAt).toLocaleDateString()}</div>
                     </div>
-                    <div class="comment-text" style="font-size:0.95rem;">${c.text}</div>
-                    ${(currentUser && (currentUser.email === ADMIN_EMAIL || (ADMIN_EMAILS && ADMIN_EMAILS.includes(currentUser.email)))) ? `
-                        <button onclick="deleteComment('${c.id}')" style="background:none; border:none; color:red; font-size:0.75rem; cursor:pointer; margin-top:8px;">Delete</button>
+                    <div class="comment-text" style="font-size:0.95rem;">${escapeHtml(c.text)}</div>
+                    ${(currentUser && ADMIN_EMAILS.includes(currentUser.email)) ? `
+                        <button data-delete-comment="${escapeAttr(c.id)}" style="background:none; border:none; color:red; font-size:0.75rem; cursor:pointer; margin-top:8px;">Delete</button>
                     ` : ''}
                 </div>
             `).join('');
+
+                    list.querySelectorAll('[data-delete-comment]').forEach(btn => {
+                        btn.onclick = () => window.deleteComment(btn.dataset.deleteComment);
+                    });
                 };
 
                 if (currentUser) {
@@ -1183,7 +1247,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                             await workerFetch(VIDEO_API_URL, `/api/comments/${encodeURIComponent(params.id)}`, {
                                 method: 'POST',
-                                headers: { 'Content-Type': 'application/json', 'X-User-Email': currentUser.email },
+                                headers: { 'Content-Type': 'application/json', 'X-User-Email': currentUser.email, ...getAuthHeaders() },
                                 body: JSON.stringify({ text: txt })
                             });
 
@@ -1197,7 +1261,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     if (confirm('Delete comment?')) {
                         await workerFetch(VIDEO_API_URL, `/api/comments/${encodeURIComponent(params.id)}/${cid}`, {
                             method: 'DELETE',
-                            headers: { 'X-User-Email': currentUser.email }
+                            headers: { 'X-User-Email': currentUser.email, ...getAuthHeaders() }
                         });
                         refreshComments();
                     }
@@ -1239,19 +1303,19 @@ document.addEventListener('DOMContentLoaded', () => {
             ${data && data.length ? data.map(s => {
                 const uploader = uploaderMap[s.id];
                 const uploaderHtml = uploader
-                    ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Uploaded by ${uploader.name} (${uploader.email}) on ${new Date(uploader.timestamp).toLocaleDateString()}</div>`
+                    ? `<div style="font-size:0.75rem; color:var(--text-muted); margin-top:2px;">Uploaded by ${escapeHtml(uploader.name)} (${escapeHtml(uploader.email)}) on ${new Date(uploader.timestamp).toLocaleDateString()}</div>`
                     : '';
                 return `
                 <div style="padding:16px; border-bottom:1px solid var(--border-light); display:flex; justify-content:space-between; align-items:center;">
                     <div style="display:flex; gap:12px; align-items:center;">
-                        <img src="${s.thumbnailDataUrl || s.thumbnailUrl || ''}" alt="Thumbnail for ${s.title}" style="width:60px; height:34px; object-fit:cover; border-radius:var(--radius-sm);" onerror="this.style.visibility='hidden';">
+                        <img src="${escapeAttr(s.thumbnailDataUrl || s.thumbnailUrl || '')}" alt="Thumbnail for ${escapeAttr(s.title)}" style="width:60px; height:34px; object-fit:cover; border-radius:var(--radius-sm);" onerror="this.style.visibility='hidden';">
                         <div>
-                            <div style="font-weight:600;">${s.title}</div>
-                            <div style="font-size:0.8rem; color:var(--text-muted);">${formatRabbiName(s.rabbi)}</div>
+                            <div style="font-weight:600;">${escapeHtml(s.title)}</div>
+                            <div style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(formatRabbiName(s.rabbi))}</div>
                             ${uploaderHtml}
                         </div>
                     </div>
-                    <button class="btn btn-secondary" style="padding:6px 12px; color:red; border-color:transparent;" data-del="${s.id}">Delete</button>
+                    <button class="btn btn-secondary" style="padding:6px 12px; color:red; border-color:transparent;" data-del="${escapeAttr(s.id)}">Delete</button>
                 </div>`;
             }).join('') : '<div style="padding:20px;">No shiurim.</div>'}
         </div>
@@ -1283,6 +1347,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
+                                    ...getAuthHeaders(),
                                     'X-Upload-Password': password,
                                     'X-User-Email': currentUser.email,
                                     'X-User-Name': currentUser.name
@@ -1341,7 +1406,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     <label>Speaker</label>
                     <input type="text" id="rabbi" list="rabbi-list" placeholder="e.g. Rabbi Hartman" required>
                     <datalist id="rabbi-list">
-                        ${existingRabbis.map(r => `<option value="${r}">`).join('')}
+                        ${existingRabbis.map(r => `<option value="${escapeAttr(r)}">`).join('')}
                         <option value="guests">Guest Speakers</option>
                     </datalist>
                 </div>
@@ -1359,6 +1424,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
             fInput.onchange = (e) => {
                 if (e.target.files[0]) {
+                    // A thumbnail captured for a previous file must not be reused.
+                    capturedThumbnailDataUrl = null;
+                    if (vidP.src) URL.revokeObjectURL(vidP.src);
                     vidP.src = URL.createObjectURL(e.target.files[0]);
                     document.getElementById('prev').classList.remove('hidden');
                 }
@@ -1383,6 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const password = getStoredPassword();
                     const authHeaders = {
+                        ...getAuthHeaders(),
                         'X-Upload-Password': password,
                         'X-User-Email': currentUser.email,
                         'X-User-Name': currentUser.name
@@ -1407,15 +1476,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     const { r2Key, uploadId, thumbnailUrl } = await prep.json();
 
                     // Step 2: Upload video parts concurrently (10MB each, up to 4 at a time).
-                    const uploadedParts = await uploadMultipartParts({
-                        file,
-                        r2Key,
-                        uploadId,
-                        headers: authHeaders,
-                        onProgress: (completed, total) => {
-                            btn.textContent = `Uploaded ${completed}/${total} parts...`;
-                        }
-                    });
+                    let uploadedParts;
+                    try {
+                        uploadedParts = await uploadMultipartParts({
+                            file,
+                            r2Key,
+                            uploadId,
+                            headers: authHeaders,
+                            onProgress: (completed, total) => {
+                                btn.textContent = `Uploaded ${completed}/${total} parts...`;
+                            }
+                        });
+                    } catch (uploadError) {
+                        await abortMultipartUpload({ r2Key, uploadId, headers: authHeaders });
+                        throw uploadError;
+                    }
 
                     // Step 3: Complete the multipart upload
                     btn.textContent = 'Finalizing...';
@@ -1442,6 +1517,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     sessionStorage.removeItem('allShiurim');
                     allShiurimCache = [];
 
+                    capturedThumbnailDataUrl = null;
                     alert('Uploaded successfully to R2!');
                     loadPage('home');
                 } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = 'Upload Shiur'; }
@@ -1481,6 +1557,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     const password = getStoredPassword();
                     const authHeaders = {
+                        ...getAuthHeaders(),
                         'X-Upload-Password': password,
                         'X-User-Email': currentUser.email,
                         'X-User-Name': currentUser.name
@@ -1504,15 +1581,21 @@ document.addEventListener('DOMContentLoaded', () => {
                     const { r2Key, uploadId } = await prep.json();
 
                     // Upload audio parts concurrently (10MB each, up to 4 at a time).
-                    const uploadedParts = await uploadMultipartParts({
-                        file,
-                        r2Key,
-                        uploadId,
-                        headers: authHeaders,
-                        onProgress: (completed, total) => {
-                            btn.textContent = `Uploaded ${completed}/${total} parts...`;
-                        }
-                    });
+                    let uploadedParts;
+                    try {
+                        uploadedParts = await uploadMultipartParts({
+                            file,
+                            r2Key,
+                            uploadId,
+                            headers: authHeaders,
+                            onProgress: (completed, total) => {
+                                btn.textContent = `Uploaded ${completed}/${total} parts...`;
+                            }
+                        });
+                    } catch (uploadError) {
+                        await abortMultipartUpload({ r2Key, uploadId, headers: authHeaders });
+                        throw uploadError;
+                    }
 
                     btn.textContent = 'Finalizing...';
                     const completeRes = await fetch(`${MAIN_API_URL}/api/admin/complete-upload`, {
@@ -1542,21 +1625,18 @@ document.addEventListener('DOMContentLoaded', () => {
         <div id="googleSignInModal" style="display:flex; justify-content:center;"></div>
     </div>
 `;
-        if (window.google && window.google.accounts && window.google.accounts.id) {
-            window.google.accounts.id.initialize({
-                client_id: GOOGLE_CLIENT_ID,
-                callback: (response) => {
-                    window.handleCredentialResponse(response);
-                    setTimeout(() => {
-                        if (currentUser) renderPasswordModal(target);
-                    }, 500);
-                },
-                auto_select: false
-            });
+        if (initializeGoogleSignIn()) {
             window.google.accounts.id.renderButton(
                 document.getElementById('googleSignInModal'),
                 { type: 'standard', theme: 'outline', size: 'large', text: 'signin_with' }
             );
+            // Re-render the protected page as soon as sign-in succeeds; the global
+            // callback stays the single initialized one.
+            const onSuccess = () => {
+                window.removeEventListener('google-signin-success', onSuccess);
+                loadPage(target);
+            };
+            window.addEventListener('google-signin-success', onSuccess);
         } else {
             document.getElementById('googleSignInModal').innerHTML = '<button class="btn btn-primary js-google-sign-in">Sign In with Google</button>';
         }
@@ -1568,7 +1648,7 @@ document.addEventListener('DOMContentLoaded', () => {
         contentArea.innerHTML = `
     <div style="max-width:400px; margin:60px auto; background:var(--bg-surface-solid); padding:30px; border-radius:var(--radius-md); border:1px solid var(--border-light); text-align:center;">
         <h3>Admin Access</h3>
-        <p style="color:var(--text-muted); margin:12px 0;">Signed in as ${currentUser.name}</p>
+        <p style="color:var(--text-muted); margin:12px 0;">Signed in as ${escapeHtml(currentUser.name)}</p>
         <input type="password" id="pwd" placeholder="Admin Password" style="margin:16px 0;">
         <button id="pwdBtn" class="btn btn-primary">Unlock</button>
     </div>
@@ -1579,6 +1659,7 @@ document.addEventListener('DOMContentLoaded', () => {
             try {
                 const res = await fetch(`${MAIN_API_URL}/api/admin/shiurim`, {
                     headers: {
+                        ...getAuthHeaders(),
                         'X-Upload-Password': password,
                         'X-User-Email': currentUser.email,
                         'X-User-Name': currentUser.name
@@ -1588,7 +1669,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     setStoredPassword(password);
                     loadPage(target);
                 } else {
-                    alert('Incorrect password');
+                    alert('Incorrect password, or your Google sign-in has expired. Reload the page and sign in again.');
                 }
             } catch (err) {
                 alert('Failed to verify password');
@@ -1600,6 +1681,11 @@ document.addEventListener('DOMContentLoaded', () => {
     window.loadPage = (p, params, skipHistory = false) => {
         document.body.classList.remove('cinema-mode');
         document.getElementById('globalMenu')?.classList.remove('active');
+        // Player shortcuts are page-scoped; drop the previous page's handler.
+        if (activeShortcutHandler) {
+            document.removeEventListener('keydown', activeShortcutHandler);
+            activeShortcutHandler = null;
+        }
         navItems.forEach(n => {
             n.classList.remove('active');
             if (n.dataset.page === p) n.classList.add('active');
@@ -1718,6 +1804,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.getElementById('signOutBtn').onclick = () => {
         localStorage.removeItem('googleUser');
+        localStorage.removeItem('googleCredential');
         currentUser = null;
         if (window.google?.accounts?.id) window.google.accounts.id.disableAutoSelect();
         window.location.reload();

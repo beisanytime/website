@@ -6,17 +6,24 @@ class UserProfile {
     required this.name,
     required this.email,
     required this.picture,
+    this.idToken = '',
   });
 
   final String name;
   final String email;
   final String picture;
 
+  /// Google ID token. The workers verify its signature before trusting `email`,
+  /// so this is what authorizes admin and community writes. It expires after
+  /// about an hour; a stale value simply gets a 401 until the user signs in again.
+  final String idToken;
+
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
       name: json['name'] as String? ?? '',
       email: json['email'] as String? ?? '',
       picture: json['picture'] as String? ?? '',
+      idToken: json['idToken'] as String? ?? '',
     );
   }
 
@@ -24,6 +31,7 @@ class UserProfile {
         'name': name,
         'email': email,
         'picture': picture,
+        'idToken': idToken,
       };
 }
 
@@ -34,11 +42,15 @@ class AdminCredentials {
     required this.email,
     required this.name,
     required this.password,
+    this.idToken = '',
   });
 
   final String email;
   final String name;
   final String password;
+
+  /// Verified server-side; without it the worker rejects every admin route.
+  final String idToken;
 }
 
 /// One row of the admin upload history.

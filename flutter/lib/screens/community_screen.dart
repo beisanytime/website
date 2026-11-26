@@ -89,8 +89,8 @@ class _CommunityScreenState extends State<CommunityScreen> {
   Future<void> _deletePost(Post post) async {
     final state = AppScope.of(context);
     final toast = AppScope.toastOf(context);
-    final email = state.user?.email;
-    if (email == null) {
+    final user = state.user;
+    if (user == null) {
       return;
     }
     final confirmed = await confirmDestructive(
@@ -102,7 +102,7 @@ class _CommunityScreenState extends State<CommunityScreen> {
       return;
     }
     try {
-      await state.api.deletePost(id: post.id, email: email);
+      await state.api.deletePost(id: post.id, user: user);
       toast.show('Post deleted');
       await _loadPosts();
     } on ApiException {
