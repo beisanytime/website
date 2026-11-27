@@ -696,7 +696,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 };
             }
 
-            const posts = await workerFetch(COMMUNITY_API_URL, '/api/posts');
+            const fetchedPosts = await workerFetch(COMMUNITY_API_URL, '/api/posts');
+            // Always show the newest announcement first (newest id breaks ties within the same second).
+            const posts = Array.isArray(fetchedPosts)
+                ? fetchedPosts.slice().sort((a, b) =>
+                    (Number(b.created_at) || 0) - (Number(a.created_at) || 0) ||
+                    (Number(b.id) || 0) - (Number(a.id) || 0))
+                : fetchedPosts;
             const list = document.getElementById('postsList');
 
             if (posts && posts.length > 0) {
